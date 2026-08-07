@@ -1204,11 +1204,14 @@ export default function App() {
       )}
 
       <footer className="app-footer">
-        <span>{t("app.copyright", { year: new Date().getFullYear() })}</span>
-        <span className="app-footer-sep" aria-hidden="true">
-          ·
-        </span>
-        <span>{t("app.version", { version: APP_VERSION })}</span>
+        <div className="app-footer-row">
+          <span>{t("app.copyright", { year: new Date().getFullYear() })}</span>
+          <span className="app-footer-sep" aria-hidden="true">
+            ·
+          </span>
+          <span>{t("app.version", { version: APP_VERSION })}</span>
+        </div>
+        <div className="app-footer-tagline">{t("app.tagline")}</div>
       </footer>
     </div>
   );
