@@ -3,7 +3,8 @@
     "title": "Picot AIRU AI",
     "subtitle": "Reply drafts grounded in past email history",
     "copyright": "© {year} PICOT",
-    "version": "v{version}"
+    "version": "v{version}",
+    "tagline": "Picot Automated inquiry responses using AI"
   },
   "nav": {
     "new": "New",
