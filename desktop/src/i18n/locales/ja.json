@@ -3,7 +3,8 @@
     "title": "Picot AIRU AI",
     "subtitle": "過去対応を根拠にした返信案支援",
     "copyright": "© {year} PICOT",
-    "version": "v{version}"
+    "version": "v{version}",
+    "tagline": "Picot Automated inquiry responses using AI"
   },
   "nav": {
     "new": "新規入力",
