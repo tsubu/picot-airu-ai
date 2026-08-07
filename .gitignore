@@ -1,0 +1,45 @@
+.DS_Store
+.venv/
+python/.venv/
+.run/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+*.log
+
+# Node / Tauri
+desktop/node_modules/
+desktop/dist/
+desktop/src-tauri/target/
+
+# Local workspace / registered data / secrets
+MailRAG/
+**/MailRAG/
+*.sqlite3
+*.lance
+*.zip
+.env
+.env.*
+!.env.example
+credentials.json
+**/exports/
+
+# Sample / test mail dumps（リポジトリには含めない）
+sample/anonymized/*
+!sample/anonymized/README.md
+*.mbox
+*.mbx
+*.eml
+!docs/**/*.md
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
