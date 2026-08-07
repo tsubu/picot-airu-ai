@@ -43,12 +43,26 @@ select {
   margin-top: auto;
   padding-top: 28px;
   display: flex;
+  flex-direction: column;
   justify-content: center;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   font-size: 0.72rem;
   letter-spacing: 0.04em;
   color: #8a95a3;
+  text-align: center;
+}
+
+.app-footer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-footer-tagline {
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  opacity: 0.9;
 }
 
 .app-footer-sep {
