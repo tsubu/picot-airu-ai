@@ -131,7 +131,7 @@ async function reconnectEngine(): Promise<void> {
 
 export default function App() {
   const { t, locale, setLocale, locales } = useI18n();
-  const [tab, setTab] = useState<Tab>("new");
+  const [tab, setTab] = useState<Tab>("history");
   const [sidecarOk, setSidecarOk] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -642,9 +642,6 @@ export default function App() {
       </header>
 
       <nav className="tabs">
-        <button className={tab === "new" ? "active" : ""} onClick={() => setTab("new")}>
-          {t("nav.new")}
-        </button>
         <button
           className={tab === "history" ? "active" : ""}
           onClick={() => {
@@ -653,6 +650,9 @@ export default function App() {
           }}
         >
           {t("nav.history")}
+        </button>
+        <button className={tab === "new" ? "active" : ""} onClick={() => setTab("new")}>
+          {t("nav.new")}
         </button>
         <button
           className={tab === "settings" ? "active" : ""}

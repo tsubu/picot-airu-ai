@@ -7,6 +7,7 @@ use std::time::Duration;
 use tauri::Manager;
 
 const SIDECAR_URL: &str = "http://127.0.0.1:18765";
+const SIDECAR_BIN: &str = "mailrag-sidecar";
 
 struct SidecarState {
     child: Mutex<Option<Child>>,
@@ -16,17 +17,55 @@ fn python_bin() -> String {
     std::env::var("MAILRAG_PYTHON").unwrap_or_else(|_| "python3".to_string())
 }
 
+fn sidecar_binary_name() -> &'static str {
+    if cfg!(windows) {
+        "mailrag-sidecar.exe"
+    } else {
+        SIDECAR_BIN
+    }
+}
+
+fn candidate_sidecar_bins(app: &tauri::AppHandle) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if let Ok(custom) = std::env::var("MAILRAG_SIDECAR_BIN") {
+        out.push(PathBuf::from(custom));
+    }
+    let name = sidecar_binary_name();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            out.push(dir.join(name));
+            // macOS .app: Contents/MacOS → also check Resources
+            if let Some(contents) = dir.parent() {
+                out.push(contents.join("Resources").join(name));
+                out.push(contents.join("Resources").join("bin").join(name));
+            }
+        }
+    }
+    if let Ok(res) = app.path().resource_dir() {
+        out.push(res.join(name));
+        out.push(res.join("bin").join(name));
+    }
+    // Dev binaries folder
+    out.push(PathBuf::from("src-tauri/binaries").join(name));
+    out.push(PathBuf::from("binaries").join(name));
+    out
+}
+
+fn find_sidecar_binary(app: &tauri::AppHandle) -> Option<PathBuf> {
+    candidate_sidecar_bins(app).into_iter().find(|p| p.is_file())
+}
+
 fn sidecar_script(_app: &tauri::AppHandle) -> PathBuf {
     if let Ok(custom) = std::env::var("MAILRAG_SIDECAR") {
         return PathBuf::from(custom);
     }
-    // Dev: walk up from cwd / executable to find python/sidecar.py
-    let mut starts = vec![
-        std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-    ];
+    let mut starts = vec![std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))];
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             starts.push(parent.to_path_buf());
+            if let Some(contents) = parent.parent() {
+                starts.push(contents.join("Resources"));
+            }
         }
     }
     for mut path in starts {
@@ -50,18 +89,41 @@ fn sidecar_script(_app: &tauri::AppHandle) -> PathBuf {
 }
 
 fn spawn_sidecar(app: &tauri::AppHandle) -> Result<Child, String> {
+    if let Some(bin) = find_sidecar_binary(app) {
+        return Command::new(&bin)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("failed to start sidecar binary {}: {e}", bin.display()));
+    }
+
     let script = sidecar_script(app);
     if !script.exists() {
-        return Err(format!("sidecar script not found: {}", script.display()));
+        return Err(format!(
+            "sidecar not found (binary '{}' or script {}). Build with scripts/build_sidecar.sh first.",
+            sidecar_binary_name(),
+            script.display()
+        ));
     }
     let mut python_dir = script.clone();
     python_dir.pop();
 
-    Command::new(python_bin())
+    // Prefer project venv python when present
+    let venv_python = python_dir.join(".venv/bin/python");
+    let venv_python_win = python_dir.join(".venv/Scripts/python.exe");
+    let py = if venv_python.is_file() {
+        venv_python.to_string_lossy().to_string()
+    } else if venv_python_win.is_file() {
+        venv_python_win.to_string_lossy().to_string()
+    } else {
+        python_bin()
+    };
+
+    Command::new(py)
         .arg(&script)
         .current_dir(&python_dir)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
         .map_err(|e| format!("failed to start sidecar: {e}"))
 }
@@ -98,7 +160,7 @@ fn ensure_sidecar(app: &tauri::AppHandle) -> Result<(), String> {
             *guard = Some(spawn_sidecar(app)?);
         }
     }
-    if wait_healthy(8_000) {
+    if wait_healthy(12_000) {
         Ok(())
     } else {
         Err("AIエンジンとの接続に失敗しました。".into())
@@ -142,7 +204,7 @@ fn restart_sidecar(app: tauri::AppHandle) -> Result<Value, String> {
         }
         *guard = Some(spawn_sidecar(&app)?);
     }
-    if wait_healthy(8_000) {
+    if wait_healthy(12_000) {
         Ok(serde_json::json!({"success": true}))
     } else {
         Err("AIエンジンとの接続に失敗しました。".into())

@@ -60,6 +60,21 @@ python -m pytest tests/ -q
 
 > 注意: Tauri 2 の依存関係は **rustc 1.88+** を推奨します。ディスク空き容量が少ないと `rustup update` / `cargo` が失敗することがあります。
 
+# デスクトップ配布ビルド（.app / .dmg / .exe）
+
+```bash
+# Sidecar + Tauri 一括
+./scripts/build_desktop.sh
+
+# 成果物例
+# macOS: desktop/src-tauri/target/release/bundle/macos/*.app
+#        desktop/src-tauri/target/release/bundle/dmg/*.dmg
+# Windows: CI の Artifacts（下記）
+```
+
+GitHub Actions: `.github/workflows/release-desktop.yml`  
+`workflow_dispatch` または `v*` タグ push で macOS / Windows 成果物を作成します。
+
 ## ライセンス
 
 MIT（予定）。詳細は [LICENSE](./LICENSE) を参照。

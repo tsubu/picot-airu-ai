@@ -29,6 +29,13 @@ MailRAG/
 !.env.example
 credentials.json
 **/exports/
+dist/
+!desktop/dist/
+
+# PyInstaller
+python/build/
+python/dist/
+python/*.spec
 
 # Sample / test mail dumps（リポジトリには含めない）
 sample/anonymized/*
