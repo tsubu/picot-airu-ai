@@ -40,7 +40,11 @@ from graph.advanced import (  # noqa: E402
 from rag.rebuild import rebuild_embeddings  # noqa: E402
 from workspace_io import export_workspace, import_workspace  # noqa: E402
 from ai.providers import (  # noqa: E402
+    build_ai_provider,
+    get_claude_api_key,
+    get_openai_api_key,
     list_provider_models,
+    provider_auth_status,
     set_claude_api_key,
     set_openai_api_key,
 )
@@ -67,11 +71,16 @@ STATE = AppState()
 def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
     action = payload.get("action")
     if action == "health":
+        with STATE.conn() as conn:
+            auth = provider_auth_status(conn)
         return {
             "success": True,
             "status": "ok",
             "workspace": str(STATE.workspace),
             "has_api_key": bool(get_api_key()),
+            "has_openai_api_key": bool(get_openai_api_key()),
+            "has_claude_api_key": bool(get_claude_api_key()),
+            "provider_auth": auth,
         }
 
     if action == "set_api_key":
@@ -88,20 +97,36 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         return {"success": True}
 
     if action == "test_api_key":
-        key = get_api_key()
-        if not key:
-            return {"success": False, "error": "APIキーが設定されていません"}
-        try:
-            from ai.gemini import GeminiProvider
+        # Prefer testing the currently selected provider.
+        with STATE.conn() as conn:
+            auth = provider_auth_status(conn)
+            provider_name = auth.get("provider") or "gemini"
+            if not auth.get("ready"):
+                return {
+                    "success": False,
+                    "error_code": "missing_api_key",
+                    "error": auth.get("message") or "APIキーが設定されていません",
+                }
+            try:
+                provider = build_ai_provider(conn)
+                if provider is None:
+                    return {
+                        "success": False,
+                        "error_code": "missing_api_key",
+                        "error": "APIキーが設定されていません",
+                    }
+                model = get_setting(conn, "reply_model")
+                text = provider.generate("Reply with OK only.", model=str(model) if model else None)
+                return {
+                    "success": True,
+                    "provider": provider_name,
+                    "message": text[:200],
+                }
+            except Exception as exc:
+                from ai.providers import classify_provider_error
 
-            model = None
-            with STATE.conn() as conn:
-                model = get_setting(conn, "reply_model", "gemini-2.0-flash")
-            provider = GeminiProvider(key, default_model=str(model))
-            text = provider.generate("Reply with OK only.", model=str(model))
-            return {"success": True, "message": text[:200]}
-        except Exception as exc:
-            return {"success": False, "error": f"Gemini APIへの接続に失敗しました: {exc}"}
+                mapped = classify_provider_error(exc)
+                return {"success": False, **mapped}
 
     if action == "refresh_models":
         key = get_api_key()
@@ -171,6 +196,7 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
                 "staff_addresses",
                 "staff_domains",
                 "ui_locale",
+                "ui_theme",
                 "gemini_reply_models",
                 "openai_reply_models",
                 "claude_reply_models",
@@ -188,6 +214,7 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
             ).fetchone()
             gstats = graph_stats(conn)
             knowledge = knowledge_analysis(conn) if gstats.get("entity_count") else None
+            auth = provider_auth_status(conn)
         provider = str(data.get("ai_provider") or "gemini").lower()
         catalog_key = {
             "gemini": "gemini_reply_models",
@@ -215,6 +242,9 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         data.update(
             {
                 "has_api_key": bool(get_api_key()),
+                "has_openai_api_key": bool(get_openai_api_key()),
+                "has_claude_api_key": bool(get_claude_api_key()),
+                "provider_auth": auth,
                 "reply_models": reply_models,
                 "embedding_models": embedding_models,
                 "models_fetched_at": models_fetched_at,
@@ -483,11 +513,11 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
                 log_event(conn, "info", "generate_reply_ok", {"conversation_id": result["conversation"]["id"]})
                 return result
             except Exception as exc:
-                log_event(conn, "error", "generate_reply_failed", str(exc))
-                return {
-                    "success": False,
-                    "error": f"返答案の生成に失敗しました: {exc}",
-                }
+                from ai.providers import classify_provider_error
+
+                log_event(conn, "error", "generate_reply_failed", str(exc)[:200])
+                mapped = classify_provider_error(exc)
+                return {"success": False, **mapped}
 
     if action == "get_progress":
         return {"success": True, "progress": STATE.progress}

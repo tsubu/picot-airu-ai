@@ -228,7 +228,39 @@ def test_offline_draft_requires_opt_in(db, tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.setattr("services.reply_service.build_embedding_provider", lambda _conn: None)
     out = generate_for_new(db, "ABC-100の電源が入らない", lancedb_dir=tmp_path / "lancedb")
     assert out["success"] is False
+    assert out.get("error_code") == "missing_api_key"
     assert "API" in (out.get("error") or "") or "オフライン" in (out.get("error") or "")
+
+
+def test_classify_provider_error_codes():
+    from ai.providers import classify_provider_error, provider_auth_status
+    from database.sqlite import connect, migrate
+    from pathlib import Path
+    import tempfile
+
+    mapped = classify_provider_error(RuntimeError("401 Unauthorized invalid api key"))
+    assert mapped["error_code"] == "invalid_api_key"
+    mapped = classify_provider_error(RuntimeError("429 quota exceeded"))
+    assert mapped["error_code"] == "api_quota"
+    mapped = classify_provider_error(RuntimeError("connection timed out"))
+    assert mapped["error_code"] == "api_unreachable"
+
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / "t.sqlite3"
+        migrate(path)
+        conn = connect(path)
+        from security.credentials import set_setting
+
+        set_setting(conn, "ai_provider", "openai")
+        status = provider_auth_status(conn)
+        # OpenAI key is not set in isolated test keyring account for this process
+        # (may still exist globally — assert shape instead of absolute ready=False)
+        assert status["provider"] == "openai"
+        assert status["requires_api_key"] is True
+        assert status["code"] in {"ok", "missing_api_key"}
+        if status["ready"] is False:
+            assert "API" in (status.get("message") or "")
+        conn.close()
 
 
 def test_as_bool_coercion():

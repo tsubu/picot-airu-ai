@@ -39,6 +39,7 @@ EXPORT_SETTINGS_ALLOWLIST = {
     "ollama_base_url",
     "ollama_model",
     "ui_locale",
+    "ui_theme",
     "faq_snapshot",
 }
 

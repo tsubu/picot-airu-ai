@@ -134,6 +134,7 @@ def ensure_default_settings(conn: sqlite3.Connection) -> None:
         "use_graph_rag": True,
         "rag_top_k": 5,
         "rag_min_score": 0.25,
+        "ui_theme": "system",
     }
     for key, value in defaults.items():
         if not setting_exists(conn, key):

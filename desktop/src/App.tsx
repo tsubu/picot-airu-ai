@@ -31,8 +31,19 @@ type ModelOption = {
   kind?: string;
 };
 
+type ProviderAuth = {
+  provider?: string;
+  ready?: boolean;
+  requires_api_key?: boolean;
+  code?: string;
+  message?: string | null;
+};
+
 type Settings = {
   has_api_key?: boolean;
+  has_openai_api_key?: boolean;
+  has_claude_api_key?: boolean;
+  provider_auth?: ProviderAuth;
   company_name?: string;
   greeting?: string;
   extra_instructions?: string;
@@ -57,6 +68,7 @@ type Settings = {
   ollama_base_url?: string;
   ollama_model?: string;
   ui_locale?: string;
+  ui_theme?: string;
   faq_snapshot?: { question: string; answer: string; problem?: string }[] | string;
   staff_addresses?: string[];
   staff_domains?: string[];
@@ -96,7 +108,27 @@ type ImportRow = {
 };
 
 const SIDECAR_URL = "http://127.0.0.1:18765";
-const APP_VERSION = "0.0.2";
+const APP_VERSION = "0.0.3";
+
+type ThemeMode = "light" | "dark" | "system";
+
+function isThemeMode(value: unknown): value is ThemeMode {
+  return value === "light" || value === "dark" || value === "system";
+}
+
+function resolveTheme(mode: ThemeMode): "light" | "dark" {
+  if (mode === "light" || mode === "dark") return mode;
+  if (typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    return "dark";
+  }
+  return "light";
+}
+
+function applyThemeToDocument(mode: ThemeMode) {
+  const resolved = resolveTheme(mode);
+  document.documentElement.dataset.theme = resolved;
+  document.documentElement.style.colorScheme = resolved;
+}
 
 function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -162,6 +194,23 @@ export default function App() {
   >([]);
   const [staffAddresses, setStaffAddresses] = useState("");
   const [staffDomains, setStaffDomains] = useState("");
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
+    const saved = localStorage.getItem("picot_ui_theme");
+    return isThemeMode(saved) ? saved : "system";
+  });
+
+  useEffect(() => {
+    applyThemeToDocument(themeMode);
+    localStorage.setItem("picot_ui_theme", themeMode);
+  }, [themeMode]);
+
+  useEffect(() => {
+    if (themeMode !== "system") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => applyThemeToDocument("system");
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [themeMode]);
 
   const replyModelOptions = useMemo(() => {
     const list = settings.reply_models || [];
@@ -172,16 +221,83 @@ export default function App() {
     return list;
   }, [settings.reply_models, settings.reply_model]);
 
+  function providerLabel(code?: string) {
+    switch ((code || settings.ai_provider || "gemini").toLowerCase()) {
+      case "openai":
+        return t("settings.providerOpenai");
+      case "claude":
+      case "anthropic":
+        return t("settings.providerClaude");
+      case "ollama":
+        return t("settings.providerOllama");
+      default:
+        return t("settings.providerGemini");
+    }
+  }
+
+  const selectedProvider = (settings.ai_provider || "gemini").toLowerCase();
+  const showApiKeyPrompt = (() => {
+    if (selectedProvider === "ollama") return false;
+    if (selectedProvider === "openai") return settings.has_openai_api_key === false;
+    if (selectedProvider === "claude" || selectedProvider === "anthropic") {
+      return settings.has_claude_api_key === false;
+    }
+    return settings.has_api_key === false;
+  })();
+  const apiPromptMessage =
+    settings.provider_auth?.provider === selectedProvider && settings.provider_auth?.message
+      ? settings.provider_auth.message
+      : t("apiPrompt.missing", { provider: providerLabel(selectedProvider) });
+
+  function formatApiError(res: { error?: string; error_code?: string }) {
+    const code = res.error_code;
+    if (code === "missing_api_key") return t("errors.missingApiKey", { provider: providerLabel() });
+    if (code === "invalid_api_key") return t("errors.invalidApiKey");
+    if (code === "api_unreachable") return t("errors.apiUnreachable");
+    if (code === "api_quota") return t("errors.apiQuota");
+    return res.error || t("errors.generateFailed");
+  }
+
   async function refreshHealth() {
     try {
       if (isTauri()) {
-        const res = await invoke<{ success: boolean }>("sidecar_health");
+        const res = await invoke<{
+          success: boolean;
+          provider_auth?: ProviderAuth;
+          has_api_key?: boolean;
+          has_openai_api_key?: boolean;
+          has_claude_api_key?: boolean;
+        }>("sidecar_health");
         setSidecarOk(!!res.success);
+        if (res.provider_auth) {
+          setSettings((prev) => ({
+            ...prev,
+            provider_auth: res.provider_auth,
+            has_api_key: res.has_api_key,
+            has_openai_api_key: res.has_openai_api_key,
+            has_claude_api_key: res.has_claude_api_key,
+          }));
+        }
       } else {
-        const res = await sidecar<{ success: boolean }>("health");
+        const res = await sidecar<{
+          success: boolean;
+          provider_auth?: ProviderAuth;
+          has_api_key?: boolean;
+          has_openai_api_key?: boolean;
+          has_claude_api_key?: boolean;
+        }>("health");
         setSidecarOk(!!res.success);
+        if (res.provider_auth) {
+          setSettings((prev) => ({
+            ...prev,
+            provider_auth: res.provider_auth,
+            has_api_key: res.has_api_key,
+            has_openai_api_key: res.has_openai_api_key,
+            has_claude_api_key: res.has_claude_api_key,
+          }));
+        }
       }
-      setError(null);
+      // Don't clear API/user errors on health poll
     } catch {
       setSidecarOk(false);
       setError(t("engine.connectFailed"));
@@ -199,6 +315,9 @@ export default function App() {
       const domains = res.settings.staff_domains || [];
       setStaffAddresses(addrs.join(", "));
       setStaffDomains(domains.join(", "));
+      if (isThemeMode(res.settings.ui_theme)) {
+        setThemeMode(res.settings.ui_theme);
+      }
     }
   }
 
@@ -208,6 +327,19 @@ export default function App() {
     try {
       const res = await sidecar<{ success: boolean; error?: string }>("save_settings", {
         settings: { ui_locale: next },
+      });
+      if (!res.success) throw new Error(res.error || t("errors.saveFailed"));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function changeTheme(next: ThemeMode) {
+    setThemeMode(next);
+    setSettings((prev) => ({ ...prev, ui_theme: next }));
+    try {
+      const res = await sidecar<{ success: boolean; error?: string }>("save_settings", {
+        settings: { ui_theme: next },
       });
       if (!res.success) throw new Error(res.error || t("errors.saveFailed"));
     } catch (e) {
@@ -254,14 +386,18 @@ export default function App() {
     setBusy(true);
     setError(null);
     try {
+      if (showApiKeyPrompt) {
+        throw new Error(t("errors.missingApiKey", { provider: providerLabel() }));
+      }
       const res = await sidecar<{
         success: boolean;
         error?: string;
+        error_code?: string;
         conversation?: Conversation;
         sources?: Source[];
         insufficient_evidence?: boolean;
       }>("generate_reply", { content: mailText });
-      if (!res.success) throw new Error(res.error || t("errors.generateFailed"));
+      if (!res.success) throw new Error(formatApiError(res));
       setActiveConversation(res.conversation || null);
       setSources(res.sources || []);
       setInsufficient(!!res.insufficient_evidence);
@@ -278,9 +414,13 @@ export default function App() {
     setBusy(true);
     setError(null);
     try {
+      if (showApiKeyPrompt) {
+        throw new Error(t("errors.missingApiKey", { provider: providerLabel() }));
+      }
       const res = await sidecar<{
         success: boolean;
         error?: string;
+        error_code?: string;
         conversation?: Conversation;
         sources?: Source[];
         insufficient_evidence?: boolean;
@@ -288,7 +428,7 @@ export default function App() {
         conversation_id: activeConversation.id,
         content: followupText,
       });
-      if (!res.success) throw new Error(res.error || t("errors.generateFailed"));
+      if (!res.success) throw new Error(formatApiError(res));
       setActiveConversation(res.conversation || null);
       setSources(res.sources || []);
       setInsufficient(!!res.insufficient_evidence);
@@ -348,10 +488,13 @@ export default function App() {
     setBusy(true);
     setError(null);
     try {
-      const res = await sidecar<{ success: boolean; error?: string; message?: string }>(
-        "test_api_key",
-      );
-      if (!res.success) throw new Error(res.error || t("errors.connectionTestFailed"));
+      const res = await sidecar<{
+        success: boolean;
+        error?: string;
+        error_code?: string;
+        message?: string;
+      }>("test_api_key");
+      if (!res.success) throw new Error(formatApiError(res));
       alert(t("alerts.connectionOk"));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -429,6 +572,7 @@ export default function App() {
           ollama_base_url: settings.ollama_base_url || "http://127.0.0.1:11434",
           ollama_model: settings.ollama_model || "llama3.2",
           ui_locale: locale,
+          ui_theme: themeMode,
           staff_addresses: staffAddresses
             .split(",")
             .map((s) => s.trim())
@@ -689,14 +833,31 @@ export default function App() {
       {error && (
         <div className="error">
           <span>{error}</span>
-          <button
-            onClick={() => {
-              reconnectEngine()
-                .then(() => refreshHealth())
-                .catch(() => refreshHealth());
-            }}
-          >
-            {t("engine.reconnect")}
+          <div className="error-actions">
+            {(error.includes("API") || error.includes("api") || showApiKeyPrompt) && (
+              <button type="button" onClick={() => setTab("settings")}>
+                {t("apiPrompt.openSettings")}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                reconnectEngine()
+                  .then(() => refreshHealth())
+                  .catch(() => refreshHealth());
+              }}
+            >
+              {t("engine.reconnect")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showApiKeyPrompt && !error && (
+        <div className="warn api-prompt">
+          <span>{apiPromptMessage}</span>
+          <button type="button" onClick={() => setTab("settings")}>
+            {t("apiPrompt.openSettings")}
           </button>
         </div>
       )}
@@ -812,12 +973,35 @@ export default function App() {
             ))}
           </select>
 
+          <h2>{t("settings.appearanceHeading")}</h2>
+          <p className="muted">{t("settings.appearanceHint")}</p>
+          <label>{t("settings.theme")}</label>
+          <select
+            value={themeMode}
+            onChange={(e) => changeTheme(e.target.value as ThemeMode)}
+          >
+            <option value="light">{t("settings.themeLight")}</option>
+            <option value="dark">{t("settings.themeDark")}</option>
+            <option value="system">{t("settings.themeSystem")}</option>
+          </select>
+
           <h2>{t("settings.aiHeading")}</h2>
           <p className="muted">{t("settings.apiKeyHint")}</p>
           <label>{t("settings.aiProvider")}</label>
           <select
             value={settings.ai_provider || "gemini"}
-            onChange={(e) => setSettings({ ...settings, ai_provider: e.target.value })}
+            onChange={(e) => {
+              const value = e.target.value;
+              setSettings({ ...settings, ai_provider: value });
+              sidecar<{ success: boolean; error?: string }>("save_settings", {
+                settings: { ai_provider: value, embedding_provider: value === "claude" ? "gemini" : value },
+              })
+                .then(async (res) => {
+                  if (!res.success) throw new Error(res.error || t("errors.saveFailed"));
+                  await loadSettings();
+                })
+                .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+            }}
           >
             <option value="gemini">{t("settings.providerGemini")}</option>
             <option value="openai">{t("settings.providerOpenai")}</option>
@@ -851,7 +1035,10 @@ export default function App() {
           )}
           {settings.ai_provider === "openai" && (
             <>
-              <label>{t("settings.openaiKey")}</label>
+              <label>
+                {t("settings.openaiKey")}{" "}
+                {settings.has_openai_api_key ? t("settings.configured") : t("settings.notConfigured")}
+              </label>
               <input
                 type="password"
                 value={openaiKeyInput}
@@ -866,6 +1053,9 @@ export default function App() {
               <div className="actions">
                 <button disabled={busy || !openaiKeyInput} onClick={saveOpenaiKey}>
                   {t("settings.saveKey")}
+                </button>
+                <button disabled={busy || !settings.has_openai_api_key} onClick={testApiKey}>
+                  {t("settings.testConnection")}
                 </button>
                 <button
                   disabled={busy}
@@ -882,7 +1072,10 @@ export default function App() {
           )}
           {settings.ai_provider === "claude" && (
             <>
-              <label>{t("settings.claudeKey")}</label>
+              <label>
+                {t("settings.claudeKey")}{" "}
+                {settings.has_claude_api_key ? t("settings.configured") : t("settings.notConfigured")}
+              </label>
               <input
                 type="password"
                 value={claudeKeyInput}
@@ -898,6 +1091,9 @@ export default function App() {
               <div className="actions">
                 <button disabled={busy || !claudeKeyInput} onClick={saveClaudeKey}>
                   {t("settings.saveKey")}
+                </button>
+                <button disabled={busy || !settings.has_claude_api_key} onClick={testApiKey}>
+                  {t("settings.testConnection")}
                 </button>
                 <button
                   disabled={busy}

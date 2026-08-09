@@ -245,6 +245,109 @@ def build_embedding_provider(conn) -> EmbeddingProvider | None:
     )
 
 
+def provider_auth_status(conn) -> dict[str, Any]:
+    """Return whether the selected AI provider can authenticate (key present / local)."""
+    provider = str(get_setting(conn, "ai_provider", "gemini") or "gemini").lower()
+    if provider in {"claude", "anthropic"}:
+        ready = bool(get_claude_api_key())
+        return {
+            "provider": "claude",
+            "ready": ready,
+            "requires_api_key": True,
+            "code": "ok" if ready else "missing_api_key",
+            "message": (
+                None
+                if ready
+                else "Claude（Anthropic）の APIキーが未設定です。設定画面で登録してください。"
+            ),
+        }
+    if provider == "openai":
+        ready = bool(get_openai_api_key())
+        return {
+            "provider": "openai",
+            "ready": ready,
+            "requires_api_key": True,
+            "code": "ok" if ready else "missing_api_key",
+            "message": (
+                None
+                if ready
+                else "OpenAI の APIキーが未設定です。設定画面で登録してください。"
+            ),
+        }
+    if provider == "ollama":
+        return {
+            "provider": "ollama",
+            "ready": True,
+            "requires_api_key": False,
+            "code": "ok",
+            "message": None,
+        }
+    ready = bool(get_api_key())
+    return {
+        "provider": "gemini",
+        "ready": ready,
+        "requires_api_key": True,
+        "code": "ok" if ready else "missing_api_key",
+        "message": (
+            None
+            if ready
+            else "Gemini の APIキーが未設定です。設定画面で登録してください。"
+        ),
+    }
+
+
+def classify_provider_error(exc: BaseException) -> dict[str, str]:
+    """Map provider exceptions to stable error_code + user-facing Japanese message."""
+    text = str(exc)
+    low = text.lower()
+    if any(
+        x in low
+        for x in (
+            "401",
+            "403",
+            "unauthorized",
+            "invalid api key",
+            "incorrect api key",
+            "authentication",
+            "permission_denied",
+            "api key not valid",
+            "invalid_api_key",
+            "invalid x-api-key",
+        )
+    ):
+        return {
+            "error_code": "invalid_api_key",
+            "error": "APIキーが正しくないか、権限がありません。設定画面でキーを確認・再登録してください。",
+        }
+    if any(x in low for x in ("429", "quota", "resource_exhausted", "rate limit", "insufficient_quota")):
+        return {
+            "error_code": "api_quota",
+            "error": "APIの利用上限に達している可能性があります。しばらく待つか、プラン／課金を確認してください。",
+        }
+    if any(
+        x in low
+        for x in (
+            "timed out",
+            "timeout",
+            "connection refused",
+            "failed to establish",
+            "name or service not known",
+            "nodename nor servname",
+            "unreachable",
+            "temporary failure",
+            "network is unreachable",
+        )
+    ):
+        return {
+            "error_code": "api_unreachable",
+            "error": "AIサービスに接続できません。ネットワーク接続とプロバイダの稼働状況を確認してください。",
+        }
+    return {
+        "error_code": "api_error",
+        "error": f"AIサービスでエラーが発生しました: {text[:240]}",
+    }
+
+
 def list_provider_models(conn) -> dict[str, Any]:
     provider = str(get_setting(conn, "ai_provider", "gemini") or "gemini").lower()
     if provider == "ollama":

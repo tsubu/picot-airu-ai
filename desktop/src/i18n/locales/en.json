@@ -18,6 +18,10 @@
     "reconnect": "Restart",
     "connectFailed": "Failed to connect to the AI engine."
   },
+  "apiPrompt": {
+    "missing": "{provider} API key is not set. Register it in Settings.",
+    "openSettings": "Open Settings"
+  },
   "new": {
     "heading": "New inquiry",
     "mailLabel": "Customer email",
@@ -48,6 +52,12 @@
     "languageHeading": "Display language",
     "languageHint": "UI language. Add another JSON locale file to support more languages.",
     "language": "Language",
+    "appearanceHeading": "Appearance",
+    "appearanceHint": "Switch between light and dark. You can also follow the system setting.",
+    "theme": "Theme",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "themeSystem": "Match system",
     "aiHeading": "AI settings",
     "apiKeyHint": "API keys are stored in the OS Credential Store (not in SQLite)",
     "aiProvider": "AI Provider",
@@ -156,6 +166,10 @@
     "loadConversationFailed": "Failed to load conversation",
     "selectWorkspaceZip": "Select a Workspace ZIP file",
     "selectImportFile": "Select a file to import",
-    "fileReadFailed": "Failed to read file"
+    "fileReadFailed": "Failed to read file",
+    "missingApiKey": "{provider} API key is not set. Register it in Settings.",
+    "invalidApiKey": "The API key is invalid or lacks permission. Check and re-enter it in Settings.",
+    "apiUnreachable": "Cannot reach the AI service. Check your network connection.",
+    "apiQuota": "API quota may be exhausted. Wait a bit or check your billing plan."
   }
 }

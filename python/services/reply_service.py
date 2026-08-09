@@ -178,6 +178,7 @@ def _generate(
     return {
         "success": ok,
         "error": result.get("error"),
+        "error_code": result.get("error_code"),
         "conversation": conversation,
         "answer": result.get("answer"),
         "confidence": result.get("confidence"),

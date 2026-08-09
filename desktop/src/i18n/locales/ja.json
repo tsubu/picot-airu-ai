@@ -18,6 +18,10 @@
     "reconnect": "再起動",
     "connectFailed": "AIエンジンとの接続に失敗しました。"
   },
+  "apiPrompt": {
+    "missing": "{provider} の APIキーが未設定です。設定タブで登録してください。",
+    "openSettings": "設定を開く"
+  },
   "new": {
     "heading": "新しい問い合わせ",
     "mailLabel": "お客様からのメール",
@@ -48,6 +52,12 @@
     "languageHeading": "表示言語",
     "languageHint": "UIの表示言語です。JSONロケールを追加すれば他言語も増やせます。",
     "language": "言語",
+    "appearanceHeading": "外観",
+    "appearanceHint": "画面の明るさを切り替えます。システムに合わせることもできます。",
+    "theme": "テーマ",
+    "themeLight": "ライト",
+    "themeDark": "ダーク",
+    "themeSystem": "システム設定に合わせる",
     "aiHeading": "AI設定",
     "apiKeyHint": "API Key は OS の Credential Store に保存します（SQLiteへは保存しません）",
     "aiProvider": "AI Provider",
@@ -156,6 +166,10 @@
     "loadConversationFailed": "会話の読み込みに失敗しました",
     "selectWorkspaceZip": "Workspace ZIP を選択してください",
     "selectImportFile": "インポートするファイルを選択してください",
-    "fileReadFailed": "ファイル読み込みに失敗しました"
+    "fileReadFailed": "ファイル読み込みに失敗しました",
+    "missingApiKey": "{provider} の APIキーが未設定です。設定タブで登録してください。",
+    "invalidApiKey": "APIキーが正しくないか、権限がありません。設定でキーを確認・再登録してください。",
+    "apiUnreachable": "AIサービスに接続できません。ネットワーク接続を確認してください。",
+    "apiQuota": "APIの利用上限に達している可能性があります。しばらく待つか課金状況を確認してください。"
   }
 }

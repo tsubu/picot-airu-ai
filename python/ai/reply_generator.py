@@ -182,7 +182,8 @@ def generate_reply(
             return {
                 "success": False,
                 "insufficient_evidence": False,
-                "error": "AIプロバイダが未設定です。設定画面でAPIキーを登録するか、開発用オフライン下書きを有効にしてください。",
+                "error_code": "missing_api_key",
+                "error": "AIプロバイダのAPIキーが未設定です。設定画面で登録してください。",
                 "answer": "",
                 "confidence": 0.0,
                 "sources": [
@@ -209,7 +210,24 @@ def generate_reply(
             "model": "offline-fallback",
         }
 
-    answer = provider.generate(prompt, model=model)
+    try:
+        answer = provider.generate(prompt, model=model)
+    except Exception as exc:
+        from ai.providers import classify_provider_error
+
+        mapped = classify_provider_error(exc)
+        return {
+            "success": False,
+            "insufficient_evidence": False,
+            "error_code": mapped["error_code"],
+            "error": mapped["error"],
+            "answer": "",
+            "confidence": 0.0,
+            "sources": [
+                {"qa_id": h.get("qa_id"), "score": h.get("score")} for h in strong_hits
+            ],
+            "graph_hits": graph_context or [],
+        }
     avg = sum(float(h.get("score") or 0) for h in strong_hits) / len(strong_hits)
     return {
         "success": True,
