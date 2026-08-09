@@ -108,7 +108,7 @@ type ImportRow = {
 };
 
 const SIDECAR_URL = "http://127.0.0.1:18765";
-const APP_VERSION = "0.0.4";
+const APP_VERSION = "0.0.5";
 
 type ThemeMode = "light" | "dark" | "system";
 
@@ -211,6 +211,18 @@ export default function App() {
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, [themeMode]);
+
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    if (busy) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = prev || "";
+    }
+    return () => {
+      document.body.style.overflow = prev || "";
+    };
+  }, [busy]);
 
   const replyModelOptions = useMemo(() => {
     const list = settings.reply_models || [];
@@ -863,7 +875,30 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className={`app${busy ? " is-busy" : ""}`} aria-busy={busy}>
+      {busy && (
+        <div
+          className="busy-overlay"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="busy-title"
+          aria-describedby="busy-desc"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") e.preventDefault();
+          }}
+        >
+          <div className="busy-card">
+            <div className="busy-spinner" aria-hidden="true" />
+            <p id="busy-title" className="busy-title">
+              {t("app.processing")}
+            </p>
+            <p id="busy-desc" className="busy-hint">
+              {t("app.processingHint")}
+            </p>
+          </div>
+        </div>
+      )}
       <header className="top">
         <div>
           <h1>{t("app.title")}</h1>

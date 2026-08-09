@@ -4,7 +4,9 @@
     "subtitle": "過去対応を根拠にした返信案支援",
     "copyright": "© {year} PICOT",
     "version": "v{version}",
-    "tagline": "Picot Automated inquiry responses using AI"
+    "tagline": "Picot Automated inquiry responses using AI",
+    "processing": "処理中…",
+    "processingHint": "完了するまで操作できません。しばらくお待ちください。"
   },
   "nav": {
     "new": "新規入力",

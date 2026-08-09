@@ -4,7 +4,9 @@
     "subtitle": "Reply drafts grounded in past email history",
     "copyright": "© {year} PICOT",
     "version": "v{version}",
-    "tagline": "Picot Automated inquiry responses using AI"
+    "tagline": "Picot Automated inquiry responses using AI",
+    "processing": "Processing…",
+    "processingHint": "Please wait. The screen is locked until this finishes."
   },
   "nav": {
     "new": "New",
