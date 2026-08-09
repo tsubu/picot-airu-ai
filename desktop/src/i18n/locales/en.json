@@ -135,6 +135,7 @@
     "openaiKeySaved": "OpenAI API Key saved",
     "claudeKeySaved": "Claude API Key saved",
     "importDone": "Added {added} / duplicates {dup} / QA {qa}",
+    "importPartial": "Import finished with warnings. Check the messages above.",
     "ragRebuilt": "RAG rebuild done: {n} embeddings",
     "graphRebuilt": "Graph rebuild done: Entity {entities} / Relation {relations}",
     "workspaceExported": "Workspace exported:\n{path}",
@@ -152,6 +153,7 @@
     "exportFailed": "Export failed",
     "importFailed": "Import failed",
     "importMailFailed": "Mail import failed",
+    "loadConversationFailed": "Failed to load conversation",
     "selectWorkspaceZip": "Select a Workspace ZIP file",
     "selectImportFile": "Select a file to import",
     "fileReadFailed": "Failed to read file"

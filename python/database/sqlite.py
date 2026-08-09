@@ -184,4 +184,7 @@ def connect(db_path: Path) -> sqlite3.Connection:
 def migrate(db_path: Path) -> None:
     with connect(db_path) as conn:
         conn.executescript(SCHEMA_SQL)
+        from security.credentials import ensure_default_settings
+
+        ensure_default_settings(conn)
         conn.commit()

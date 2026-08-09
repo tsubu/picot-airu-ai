@@ -7,6 +7,7 @@ from pathlib import Path
 
 from database.models import MailMessage
 from importer.base import BaseImporter
+from importer.csv_headers import pick_field
 
 # Flexible header aliases seen in Mail Dealer exports / samples
 _ALIASES = {
@@ -21,13 +22,9 @@ _ALIASES = {
 }
 
 
+# Back-compat for older imports
 def _pick(row: dict[str, str], keys: tuple[str, ...]) -> str | None:
-    lower_map = {k.strip().lower(): v for k, v in row.items() if k}
-    for key in keys:
-        value = lower_map.get(key.lower())
-        if value is not None and str(value).strip() != "":
-            return str(value).strip()
-    return None
+    return pick_field(row, keys)
 
 
 class MailDealerCSVImporter(BaseImporter):
@@ -38,17 +35,17 @@ class MailDealerCSVImporter(BaseImporter):
         with path.open("r", encoding="utf-8-sig", newline="") as fh:
             reader = csv.DictReader(fh)
             for idx, row in enumerate(reader, start=1):
-                source_id = _pick(row, _ALIASES["source_id"]) or f"{path.name}:{idx}"
-                to_raw = _pick(row, _ALIASES["to_addresses"]) or ""
-                role_hint = _pick(row, _ALIASES["role"])
+                source_id = pick_field(row, _ALIASES["source_id"]) or f"{path.name}:{idx}"
+                to_raw = pick_field(row, _ALIASES["to_addresses"]) or ""
+                role_hint = pick_field(row, _ALIASES["role"])
                 messages.append(
                     MailMessage(
-                        message_id=_pick(row, _ALIASES["message_id"]),
-                        subject=_pick(row, _ALIASES["subject"]),
-                        from_address=_pick(row, _ALIASES["from_address"]),
+                        message_id=pick_field(row, _ALIASES["message_id"]),
+                        subject=pick_field(row, _ALIASES["subject"]),
+                        from_address=pick_field(row, _ALIASES["from_address"]),
                         to_addresses=[p.strip() for p in to_raw.split(",") if p.strip()],
-                        date=_pick(row, _ALIASES["date"]),
-                        body_text=_pick(row, _ALIASES["body_text"]) or "",
+                        date=pick_field(row, _ALIASES["date"]),
+                        body_text=pick_field(row, _ALIASES["body_text"]) or "",
                         source_type=self.source_type,
                         source_id=source_id,
                         metadata={"role_hint": role_hint, "row": idx},

@@ -62,6 +62,9 @@ def test_graph_rebuild_and_local_search(db, sample_csv: Path):
 
 def test_hybrid_works_without_graph(db, sample_csv: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     run_import(db, source_type="maildealer_csv", path=sample_csv)
+    from security.credentials import set_setting
+
+    set_setting(db, "allow_offline_draft", True)
     monkeypatch.setattr("services.reply_service.build_ai_provider", lambda _conn: None)
     # no graph rebuild
     result = generate_for_new(

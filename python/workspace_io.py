@@ -84,6 +84,25 @@ def export_workspace(root: Path | None = None) -> dict[str, Any]:
     return {"success": True, "path": str(out), "meta": meta}
 
 
+def _safe_extractall(zf: zipfile.ZipFile, dest: Path) -> None:
+    """Extract ZIP members while preventing Zip Slip path traversal."""
+    dest = dest.resolve()
+    for info in zf.infolist():
+        name = info.filename
+        if not name or name.endswith("/"):
+            target = (dest / name).resolve()
+            if not str(target).startswith(str(dest) + "/") and target != dest:
+                raise ValueError(f"unsafe zip path: {name}")
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        target = (dest / name).resolve()
+        if not str(target).startswith(str(dest) + "/"):
+            raise ValueError(f"unsafe zip path: {name}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with zf.open(info) as src, target.open("wb") as out:
+            shutil.copyfileobj(src, out)
+
+
 def import_workspace(zip_path: str | Path, root: Path | None = None) -> dict[str, Any]:
     base = ensure_workspace(root)
     zip_path = Path(zip_path)
@@ -92,8 +111,12 @@ def import_workspace(zip_path: str | Path, root: Path | None = None) -> dict[str
 
     staging = base / "workspace" / "imports" / f"workspace_import_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     staging.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(zip_path, "r") as zf:
-        zf.extractall(staging)
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            _safe_extractall(zf, staging)
+    except Exception as exc:
+        shutil.rmtree(staging, ignore_errors=True)
+        return {"success": False, "error": f"ZIP 展開に失敗しました: {exc}"}
 
     src_db = staging / "mailrag.sqlite3"
     if not src_db.exists():

@@ -96,7 +96,7 @@ type ImportRow = {
 };
 
 const SIDECAR_URL = "http://127.0.0.1:18765";
-const APP_VERSION = "0.01";
+const APP_VERSION = "0.0.2";
 
 function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -160,8 +160,8 @@ export default function App() {
   const [graphTrends, setGraphTrends] = useState<
     { entity_type: string; name: string; mentions: number }[]
   >([]);
-  const [staffAddresses, setStaffAddresses] = useState("support@example.com");
-  const [staffDomains, setStaffDomains] = useState("example.com");
+  const [staffAddresses, setStaffAddresses] = useState("");
+  const [staffDomains, setStaffDomains] = useState("");
 
   const replyModelOptions = useMemo(() => {
     const list = settings.reply_models || [];
@@ -197,8 +197,8 @@ export default function App() {
       }
       const addrs = res.settings.staff_addresses || [];
       const domains = res.settings.staff_domains || [];
-      if (addrs.length) setStaffAddresses(addrs.join(", "));
-      if (domains.length) setStaffDomains(domains.join(", "));
+      setStaffAddresses(addrs.join(", "));
+      setStaffDomains(domains.join(", "));
     }
   }
 
@@ -206,7 +206,10 @@ export default function App() {
     setLocale(next);
     setSettings((prev) => ({ ...prev, ui_locale: next }));
     try {
-      await sidecar("save_settings", { settings: { ui_locale: next } });
+      const res = await sidecar<{ success: boolean; error?: string }>("save_settings", {
+        settings: { ui_locale: next },
+      });
+      if (!res.success) throw new Error(res.error || t("errors.saveFailed"));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -302,10 +305,14 @@ export default function App() {
     setBusy(true);
     setError(null);
     try {
-      const res = await sidecar<{ success: boolean; conversation: Conversation }>(
-        "get_conversation",
-        { conversation_id: id },
-      );
+      const res = await sidecar<{
+        success: boolean;
+        conversation?: Conversation;
+        error?: string;
+      }>("get_conversation", { conversation_id: id });
+      if (!res.success || !res.conversation) {
+        throw new Error(res.error || t("errors.loadConversationFailed"));
+      }
       setActiveConversation(res.conversation);
       setSources([]);
       setTab("history");
@@ -385,7 +392,10 @@ export default function App() {
     setBusy(true);
     setError(null);
     try {
-      await sidecar("save_settings", { settings: { reply_model: modelId } });
+      const res = await sidecar<{ success: boolean; error?: string }>("save_settings", {
+        settings: { reply_model: modelId },
+      });
+      if (!res.success) throw new Error(res.error || t("errors.saveFailed"));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -396,7 +406,7 @@ export default function App() {
   async function saveAnswerSettings() {
     setBusy(true);
     try {
-      await sidecar("save_settings", {
+      const res = await sidecar<{ success: boolean; error?: string }>("save_settings", {
         settings: {
           company_name: settings.company_name || "",
           greeting: settings.greeting || "",
@@ -429,6 +439,7 @@ export default function App() {
             .filter(Boolean),
         },
       });
+      if (!res.success) throw new Error(res.error || t("errors.saveFailed"));
       await loadSettings();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -597,22 +608,30 @@ export default function App() {
       const content_base64 = await fileToBase64(importFile);
       const res = await sidecar<{
         success: boolean;
+        partial?: boolean;
         error?: string;
         new_messages?: number;
         duplicate_messages?: number;
         qa_count?: number;
+        warnings?: string[];
       }>("import_mail", {
         source_type: importType,
         filename: importFile.name,
         content_base64,
       });
       if (!res.success) throw new Error(res.error || t("errors.importMailFailed"));
+      const warnText =
+        res.warnings && res.warnings.length
+          ? `\n\n${res.warnings.join("\n")}`
+          : res.partial
+            ? `\n\n${t("alerts.importPartial")}`
+            : "";
       alert(
         t("alerts.importDone", {
           added: res.new_messages ?? 0,
           dup: res.duplicate_messages ?? 0,
           qa: res.qa_count ?? 0,
-        }),
+        }) + warnText,
       );
       setImportFile(null);
       await loadSettings();
@@ -957,9 +976,13 @@ export default function App() {
               onChange={(e) => {
                 const value = e.target.value;
                 setSettings({ ...settings, embedding_model: value });
-                sidecar("save_settings", { settings: { embedding_model: value } }).catch(
-                  (err) => setError(err instanceof Error ? err.message : String(err)),
-                );
+                sidecar<{ success: boolean; error?: string }>("save_settings", {
+                  settings: { embedding_model: value },
+                })
+                  .then((r) => {
+                    if (!r.success) throw new Error(r.error || t("errors.saveFailed"));
+                  })
+                  .catch((err) => setError(err instanceof Error ? err.message : String(err)));
               }}
             >
               {(settings.embedding_models || []).map((m) => (
@@ -1002,9 +1025,17 @@ export default function App() {
             onChange={(e) => setSettings({ ...settings, banned_phrases: e.target.value })}
           />
           <label>{t("settings.staffAddresses")}</label>
-          <input value={staffAddresses} onChange={(e) => setStaffAddresses(e.target.value)} />
+          <input
+            value={staffAddresses}
+            placeholder="support@example.com"
+            onChange={(e) => setStaffAddresses(e.target.value)}
+          />
           <label>{t("settings.staffDomains")}</label>
-          <input value={staffDomains} onChange={(e) => setStaffDomains(e.target.value)} />
+          <input
+            value={staffDomains}
+            placeholder="example.com"
+            onChange={(e) => setStaffDomains(e.target.value)}
+          />
 
           <h3>{t("settings.maskHeading")}</h3>
           <div className="checks">

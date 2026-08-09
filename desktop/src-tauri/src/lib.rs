@@ -149,16 +149,19 @@ fn wait_healthy(timeout_ms: u64) -> bool {
 }
 
 fn ensure_sidecar(app: &tauri::AppHandle) -> Result<(), String> {
+    // Prefer an already-healthy process on the fixed port. Spawning another
+    // instance would fail to bind and leave an orphan unmanaged child.
+    if wait_healthy(400) {
+        return Ok(());
+    }
     let state = app.state::<SidecarState>();
     {
         let mut guard = state.child.lock().map_err(|_| "sidecar lock poisoned")?;
-        let alive = guard
-            .as_mut()
-            .map(|c| c.try_wait().ok().flatten().is_none())
-            .unwrap_or(false);
-        if !alive {
-            *guard = Some(spawn_sidecar(app)?);
+        if let Some(mut child) = guard.take() {
+            let _ = child.kill();
+            let _ = child.wait();
         }
+        *guard = Some(spawn_sidecar(app)?);
     }
     if wait_healthy(12_000) {
         Ok(())

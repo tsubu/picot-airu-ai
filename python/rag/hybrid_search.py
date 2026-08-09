@@ -9,8 +9,25 @@ from typing import Any
 
 
 def _tokens(text: str) -> set[str]:
-    parts = re.findall(r"[A-Za-z0-9\-]+|[\u3040-\u30ff\u4e00-\u9fff]+", text.lower())
-    return {p for p in parts if len(p) >= 2}
+    """Lightweight tokenizer for JP/EN hybrid keyword search.
+
+    Latin tokens keep model numbers (ABC-100). Japanese uses character n-grams
+    so phrases like 「電源が入らない」 still match 「電源」.
+    """
+    lowered = text.lower()
+    parts: set[str] = set()
+    for m in re.findall(r"[a-z0-9]+(?:-[a-z0-9]+)*", lowered):
+        if len(m) >= 2:
+            parts.add(m)
+    for run in re.findall(r"[\u3040-\u30ff\u4e00-\u9fff]+", lowered):
+        if len(run) >= 2:
+            parts.add(run)
+        for n in (2, 3):
+            if len(run) < n:
+                continue
+            for i in range(len(run) - n + 1):
+                parts.add(run[i : i + n])
+    return parts
 
 
 class HybridSearch:
@@ -31,9 +48,24 @@ class HybridSearch:
 
     def keyword_search(self, query: str) -> list[dict[str, Any]]:
         tokens = list(_tokens(query))
-        rows = self.conn.execute(
-            "SELECT id, question, answer, product, category FROM qa_pairs ORDER BY id DESC LIMIT 500"
-        ).fetchall()
+        # Prefer SQL prefilter when tokens exist so search is not capped to newest 500.
+        clauses: list[str] = []
+        params: list[str] = []
+        for tok in tokens[:12]:
+            like = f"%{tok}%"
+            clauses.append("(question LIKE ? OR answer LIKE ? OR IFNULL(product,'') LIKE ?)")
+            params.extend([like, like, like])
+        if clauses:
+            sql = (
+                "SELECT id, question, answer, product, category FROM qa_pairs WHERE "
+                + " OR ".join(clauses)
+                + " ORDER BY id DESC LIMIT 2000"
+            )
+            rows = self.conn.execute(sql, params).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT id, question, answer, product, category FROM qa_pairs ORDER BY id DESC LIMIT 500"
+            ).fetchall()
         scored: list[dict[str, Any]] = []
         q_tokens = _tokens(query)
         for row in rows:
@@ -72,16 +104,20 @@ class HybridSearch:
             return []
         try:
             db = lancedb.connect(str(self.lancedb_dir))
-            names = db.table_names()
+            from rag.embedding_store import table_names
+
+            names = table_names(db)
             if "qa_embeddings" not in names:
                 return []
             table = db.open_table("qa_embeddings")
             hits = table.search(query_vector).limit(self.vector_limit).to_list()
             results = []
             for hit in hits:
-                # Lance distance -> crude similarity
+                # Lance L2/cosine distance -> bounded similarity in (0, 1]
                 dist = float(hit.get("_distance") or hit.get("distance") or 0.5)
-                score = max(0.0, 1.0 - dist)
+                if dist < 0:
+                    dist = 0.0
+                score = 1.0 / (1.0 + dist)
                 results.append(
                     {
                         "qa_id": hit.get("qa_id"),

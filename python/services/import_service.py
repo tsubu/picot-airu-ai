@@ -32,12 +32,28 @@ def run_import(
 
     report("parse", 0.05)
     messages = import_messages(source_type, path)
+    # QA pairing is sequential (customer then staff); process chronological order
+    messages = sorted(
+        messages,
+        key=lambda m: (
+            m.date or "",
+            str(m.source_id or ""),
+            str(m.message_id or ""),
+            int((m.metadata or {}).get("row") or 0),
+        ),
+    )
     detector = RoleDetector(
         RoleDetectorConfig(
             staff_addresses=set(staff_addresses or []),
             staff_domains=set(staff_domains or []),
         )
     )
+    warnings: list[str] = []
+    if not (staff_addresses or staff_domains):
+        warnings.append(
+            "staff_addresses / staff_domains が未設定です。"
+            "role_hint のないメールは unknown になり、QA ペアが作れない場合があります。"
+        )
 
     cur = conn.execute(
         """
@@ -77,6 +93,11 @@ def run_import(
 
         if exists:
             dup_count += 1
+            # Keep QA pairing state even when the customer mail was already imported
+            role = detector.detect(message)
+            cleaned = clean_body(message.body_text, message.body_html)
+            if role == "customer" and cleaned:
+                pending_customer = {"text": cleaned, "subject": message.subject}
             continue
 
         cur = conn.execute(
@@ -152,12 +173,18 @@ def run_import(
     conn.commit()
 
     embedded = 0
+    embed_status: dict[str, Any] | None = None
     if qa_count > 0 and lancedb_dir is not None:
         report("embedding", 0.92)
         from rag.incremental import embed_new_qa_pairs
 
         emb = embed_new_qa_pairs(conn, lancedb_dir=lancedb_dir)
+        embed_status = emb
         embedded = int(emb.get("embedded") or 0)
+        if emb.get("skipped") == "no_api_key":
+            warnings.append("Embedding をスキップしました（APIキー未設定）")
+        elif embedded == 0 and qa_count > 0:
+            warnings.append("Embedding に失敗または未実行です。設定の再構築を確認してください。")
 
     report("done", 1.0)
     return {
@@ -167,5 +194,7 @@ def run_import(
         "duplicate_messages": dup_count,
         "qa_count": qa_count,
         "embedded": embedded,
+        "embed_status": embed_status,
+        "warnings": warnings,
         "status": "completed",
     }

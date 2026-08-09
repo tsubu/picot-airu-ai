@@ -17,6 +17,58 @@ SYSTEM_RULES = """あなたは企業サポート担当の返信案作成アシ�
 """
 
 
+def _mask_text(text: str | None, config: PiiMaskConfig | None) -> str:
+    return mask_pii(text or "", config)
+
+
+def _mask_recent(
+    recent_messages: list[dict[str, str]],
+    config: PiiMaskConfig | None,
+) -> list[dict[str, str]]:
+    return [
+        {"role": m.get("role") or "customer", "content": _mask_text(m.get("content"), config)}
+        for m in recent_messages
+    ]
+
+
+def _mask_rag_hits(
+    rag_hits: list[dict[str, Any]],
+    config: PiiMaskConfig | None,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for hit in rag_hits:
+        row = dict(hit)
+        if "question" in row:
+            row["question"] = _mask_text(str(row.get("question") or ""), config)
+        if "answer" in row:
+            row["answer"] = _mask_text(str(row.get("answer") or ""), config)
+        out.append(row)
+    return out
+
+
+def _mask_graph(
+    graph_context: list[dict[str, Any]] | None,
+    config: PiiMaskConfig | None,
+) -> list[dict[str, Any]] | None:
+    if not graph_context:
+        return graph_context
+    out: list[dict[str, Any]] = []
+    for g in graph_context:
+        row = dict(g)
+        if "name" in row:
+            row["name"] = _mask_text(str(row.get("name") or ""), config)
+        neighbors = []
+        for n in row.get("neighbors") or []:
+            nn = dict(n)
+            if "name" in nn:
+                nn["name"] = _mask_text(str(nn.get("name") or ""), config)
+            neighbors.append(nn)
+        if "neighbors" in row:
+            row["neighbors"] = neighbors
+        out.append(row)
+    return out
+
+
 def build_reply_prompt(
     *,
     customer_message: str,
@@ -86,8 +138,15 @@ def generate_reply(
     min_score: float,
     pii_config: PiiMaskConfig | None = None,
     graph_context: list[dict[str, Any]] | None = None,
+    allow_offline_draft: bool = False,
 ) -> dict[str, Any]:
-    strong_hits = [h for h in rag_hits if float(h.get("score") or 0) >= min_score]
+    strong_hits = [
+        h
+        for h in rag_hits
+        if float(h.get("score") or 0) >= min_score
+        and h.get("source") != "graph-qa"
+        and h.get("evidence", True) is not False
+    ]
     # Graph alone does not satisfy evidence; Hybrid QA hits remain primary.
     if not strong_hits:
         return {
@@ -102,22 +161,41 @@ def generate_reply(
             "graph_hits": graph_context or [],
         }
 
-    masked = mask_pii(customer_message, pii_config)
+    masked_customer = _mask_text(customer_message, pii_config)
+    masked_summary = (
+        _mask_text(conversation_summary, pii_config) if conversation_summary else None
+    )
+    masked_recent = _mask_recent(recent_messages, pii_config)
+    masked_hits = _mask_rag_hits(strong_hits, pii_config)
+    masked_graph = _mask_graph(graph_context, pii_config)
+
     prompt = build_reply_prompt(
-        customer_message=masked,
-        conversation_summary=conversation_summary,
-        recent_messages=recent_messages,
-        rag_hits=strong_hits,
+        customer_message=masked_customer,
+        conversation_summary=masked_summary,
+        recent_messages=masked_recent,
+        rag_hits=masked_hits,
         answer_style=answer_style,
-        graph_context=graph_context,
+        graph_context=masked_graph,
     )
     if provider is None:
+        if not allow_offline_draft:
+            return {
+                "success": False,
+                "insufficient_evidence": False,
+                "error": "AIプロバイダが未設定です。設定画面でAPIキーを登録するか、開発用オフライン下書きを有効にしてください。",
+                "answer": "",
+                "confidence": 0.0,
+                "sources": [
+                    {"qa_id": h.get("qa_id"), "score": h.get("score")} for h in strong_hits
+                ],
+                "graph_hits": graph_context or [],
+            }
         # Offline/dev fallback: paraphrase top answer without inventing facts
         top = strong_hits[0]
         answer = (
             f"{answer_style.get('greeting') or 'お問い合わせいただきありがとうございます。'}\n\n"
-            f"{top.get('answer')}\n\n"
-            "※開発モード: Gemini未接続のため過去回答を再構成した下書きです。"
+            f"{_mask_text(str(top.get('answer') or ''), pii_config)}\n\n"
+            "※開発モード: AI未接続のため過去回答を再構成した下書きです。"
         )
         return {
             "success": True,

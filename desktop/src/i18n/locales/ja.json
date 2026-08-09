@@ -135,6 +135,7 @@
     "openaiKeySaved": "OpenAI API Key を保存しました",
     "claudeKeySaved": "Claude API Key を保存しました",
     "importDone": "追加 {added} / 重複 {dup} / QA {qa}",
+    "importPartial": "一部処理が未完了です（警告を確認してください）。",
     "ragRebuilt": "RAG再構築完了: Embedding {n} 件",
     "graphRebuilt": "Graph再構築完了: Entity {entities} / Relation {relations}",
     "workspaceExported": "Workspaceを書き出しました:\n{path}",
@@ -152,6 +153,7 @@
     "exportFailed": "Exportに失敗しました",
     "importFailed": "Importに失敗しました",
     "importMailFailed": "インポートに失敗しました",
+    "loadConversationFailed": "会話の読み込みに失敗しました",
     "selectWorkspaceZip": "Workspace ZIP を選択してください",
     "selectImportFile": "インポートするファイルを選択してください",
     "fileReadFailed": "ファイル読み込みに失敗しました"

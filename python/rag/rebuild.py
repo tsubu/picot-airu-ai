@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Callable
 
-from rag.incremental import embed_new_qa_pairs, mark_embedded, pending_qa_ids
+from rag.incremental import embed_new_qa_pairs, pending_qa_ids
 
 ProgressCallback = Callable[[str, float], None]
 
@@ -31,7 +31,9 @@ def rebuild_embeddings(
         import lancedb
 
         db = lancedb.connect(str(lancedb_dir))
-        if "qa_embeddings" in db.table_names():
+        from rag.embedding_store import table_names
+
+        if "qa_embeddings" in table_names(db):
             db.drop_table("qa_embeddings")
     except Exception:
         pass
@@ -46,7 +48,7 @@ def rebuild_embeddings(
             break
         result = embed_new_qa_pairs(conn, lancedb_dir=lancedb_dir, qa_ids=ids)
         if result.get("skipped") == "no_api_key":
-            # Mark as pending without vectors is not useful; stop
+            # Leave ids unmarked so a later rebuild can retry
             return {
                 "success": False,
                 "error": "APIキーが未設定のため Embedding 再構築を完了できません",
@@ -55,9 +57,15 @@ def rebuild_embeddings(
             }
         batch = int(result.get("embedded") or 0)
         if batch == 0:
-            # avoid infinite loop if embedder fails silently
-            mark_embedded(conn, ids)
-            break
+            # Do not mark as embedded when vectors were not written
+            return {
+                "success": False,
+                "error": result.get("error")
+                or "Embedding に失敗したため再構築を中断しました（未埋め込みのまま残しています）",
+                "embedded": embedded,
+                "total": total,
+                "pending": ids,
+            }
         embedded += batch
         report("embed", 0.2 + 0.75 * (embedded / max(total, 1)))
 

@@ -20,6 +20,8 @@ from conversation import manager as conv_manager  # noqa: E402
 from database.sqlite import connect, migrate  # noqa: E402
 from paths import ensure_workspace, lancedb_path, sqlite_path  # noqa: E402
 from security.credentials import (  # noqa: E402
+    SECRET_SETTING_KEYS,
+    as_str_list,
     delete_api_key,
     get_api_key,
     get_setting,
@@ -170,8 +172,12 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
                 "staff_domains",
                 "ui_locale",
                 "gemini_reply_models",
+                "openai_reply_models",
+                "claude_reply_models",
+                "ollama_reply_models",
                 "gemini_embedding_models",
                 "gemini_models_fetched_at",
+                "provider_models_fetched_at",
             ]
             data = {k: get_setting(conn, k) for k in keys}
             qa_count = conn.execute("SELECT COUNT(*) AS c FROM qa_pairs").fetchone()["c"]
@@ -182,9 +188,26 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
             ).fetchone()
             gstats = graph_stats(conn)
             knowledge = knowledge_analysis(conn) if gstats.get("entity_count") else None
-        reply_models = data.pop("gemini_reply_models", None) or []
+        provider = str(data.get("ai_provider") or "gemini").lower()
+        catalog_key = {
+            "gemini": "gemini_reply_models",
+            "openai": "openai_reply_models",
+            "claude": "claude_reply_models",
+            "ollama": "ollama_reply_models",
+        }.get(provider, "gemini_reply_models")
+        reply_models = data.pop(catalog_key, None) or data.get("gemini_reply_models") or []
+        for k in (
+            "gemini_reply_models",
+            "openai_reply_models",
+            "claude_reply_models",
+            "ollama_reply_models",
+        ):
+            data.pop(k, None)
         embedding_models = data.pop("gemini_embedding_models", None) or []
-        models_fetched_at = data.pop("gemini_models_fetched_at", None)
+        models_fetched_at = data.pop("provider_models_fetched_at", None) or data.pop(
+            "gemini_models_fetched_at", None
+        )
+        data.pop("gemini_models_fetched_at", None)
         if not isinstance(reply_models, list):
             reply_models = []
         if not isinstance(embedding_models, list):
@@ -212,7 +235,7 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         settings = payload.get("settings") or {}
         with STATE.conn() as conn:
             for key, value in settings.items():
-                if key in {"gemini_api_key", "api_key"}:
+                if key in SECRET_SETTING_KEYS:
                     continue
                 set_setting(conn, key, value)
             log_event(conn, "info", "settings_updated", list(settings.keys()))
@@ -257,14 +280,14 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
             STATE.progress = {"stage": stage, "percent": percent}
 
         with STATE.conn() as conn:
-            staff_addresses = get_setting(conn, "staff_addresses", []) or []
-            staff_domains = get_setting(conn, "staff_domains", []) or []
+            staff_addresses = as_str_list(get_setting(conn, "staff_addresses", []))
+            staff_domains = as_str_list(get_setting(conn, "staff_domains", []))
             result = run_import(
                 conn,
                 source_type=source_type,
                 path=path_obj,
-                staff_addresses=list(staff_addresses),
-                staff_domains=list(staff_domains),
+                staff_addresses=staff_addresses,
+                staff_domains=staff_domains,
                 progress=progress,
                 lancedb_dir=STATE.lancedb_dir,
             )
@@ -275,7 +298,17 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
                 {**result, "saved_as": str(path_obj)},
             )
         STATE.progress = {"stage": "idle", "percent": 1.0}
-        return {"success": True, "saved_as": str(path_obj), **result}
+        warnings = list(result.get("warnings") or [])
+        embed_status = result.get("embed_status") or {}
+        partial = bool(warnings) or bool(embed_status.get("error")) or (
+            embed_status.get("skipped") == "no_api_key" and int(result.get("qa_count") or 0) > 0
+        )
+        return {
+            "success": True,
+            "partial": partial,
+            "saved_as": str(path_obj),
+            **result,
+        }
 
     if action == "list_conversations":
         query = payload.get("query")
@@ -400,12 +433,22 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         with STATE.conn() as conn:
             result = list_provider_models(conn)
             if result.get("success") and result.get("reply_models"):
-                set_setting(conn, "gemini_reply_models", result["reply_models"])
+                provider = str(get_setting(conn, "ai_provider", "gemini") or "gemini").lower()
+                catalog_key = {
+                    "gemini": "gemini_reply_models",
+                    "openai": "openai_reply_models",
+                    "claude": "claude_reply_models",
+                    "ollama": "ollama_reply_models",
+                }.get(provider, f"{provider}_reply_models")
+                set_setting(conn, catalog_key, result["reply_models"])
+                # Keep legacy key in sync only for Gemini so older UI paths keep working
+                if provider == "gemini":
+                    set_setting(conn, "gemini_reply_models", result["reply_models"])
                 from datetime import datetime, timezone
 
                 set_setting(
                     conn,
-                    "gemini_models_fetched_at",
+                    "provider_models_fetched_at",
                     datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
                 )
             return result
@@ -462,16 +505,32 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        origin = self.headers.get("Origin") or ""
+        # Local desktop / Vite only; avoid reflecting arbitrary Origins.
+        if origin.startswith(("http://127.0.0.1", "http://localhost", "tauri://", "https://tauri.")):
+            self.send_header("Access-Control-Allow-Origin", origin)
+        elif not origin:
+            self.send_header("Access-Control-Allow-Origin", "http://127.0.0.1")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.end_headers()
         self.wfile.write(body)
 
+    def _reject_non_local(self) -> bool:
+        host = self.client_address[0]
+        if host in {"127.0.0.1", "::1", "localhost"}:
+            return False
+        self._send(403, {"success": False, "error": "local connections only"})
+        return True
+
     def do_OPTIONS(self) -> None:  # noqa: N802
+        if self._reject_non_local():
+            return
         self._send(200, {"success": True})
 
     def do_GET(self) -> None:  # noqa: N802
+        if self._reject_non_local():
+            return
         path = urlparse(self.path).path
         if path in {"/", "/health"}:
             self._send(200, handle_action({"action": "health"}))
@@ -479,6 +538,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"success": False, "error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
+        if self._reject_non_local():
+            return
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length) if length else b"{}"
         try:
@@ -488,14 +549,12 @@ class Handler(BaseHTTPRequestHandler):
             result = handle_action(payload)
             self._send(200, result)
         except Exception as exc:
-            self._send(
-                500,
-                {
-                    "success": False,
-                    "error": str(exc),
-                    "trace": traceback.format_exc(limit=3),
-                },
-            )
+            import os
+
+            payload: dict[str, Any] = {"success": False, "error": str(exc)}
+            if os.environ.get("MAILRAG_DEBUG") == "1":
+                payload["trace"] = traceback.format_exc(limit=3)
+            self._send(500, payload)
 
 
 def main() -> None:

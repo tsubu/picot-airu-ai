@@ -7,7 +7,8 @@ from pathlib import Path
 
 from database.models import MailMessage
 from importer.base import BaseImporter
-from importer.maildealer_csv import _ALIASES, _pick
+from importer.csv_headers import pick_field
+from importer.maildealer_csv import _ALIASES
 
 
 class CsvImporter(BaseImporter):
@@ -18,19 +19,19 @@ class CsvImporter(BaseImporter):
         with path.open("r", encoding="utf-8-sig", newline="") as fh:
             reader = csv.DictReader(fh)
             for idx, row in enumerate(reader, start=1):
-                source_id = _pick(row, _ALIASES["source_id"]) or f"{path.name}:{idx}"
-                to_raw = _pick(row, _ALIASES["to_addresses"]) or ""
+                source_id = pick_field(row, _ALIASES["source_id"]) or f"{path.name}:{idx}"
+                to_raw = pick_field(row, _ALIASES["to_addresses"]) or ""
                 messages.append(
                     MailMessage(
-                        message_id=_pick(row, _ALIASES["message_id"]),
-                        subject=_pick(row, _ALIASES["subject"]),
-                        from_address=_pick(row, _ALIASES["from_address"]),
+                        message_id=pick_field(row, _ALIASES["message_id"]),
+                        subject=pick_field(row, _ALIASES["subject"]),
+                        from_address=pick_field(row, _ALIASES["from_address"]),
                         to_addresses=[p.strip() for p in to_raw.split(",") if p.strip()],
-                        date=_pick(row, _ALIASES["date"]),
-                        body_text=_pick(row, _ALIASES["body_text"]) or "",
+                        date=pick_field(row, _ALIASES["date"]),
+                        body_text=pick_field(row, _ALIASES["body_text"]) or "",
                         source_type=self.source_type,
                         source_id=source_id,
-                        metadata={"role_hint": _pick(row, _ALIASES["role"]), "row": idx},
+                        metadata={"role_hint": pick_field(row, _ALIASES["role"]), "row": idx},
                     )
                 )
         return messages

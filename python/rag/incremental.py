@@ -67,7 +67,12 @@ def embed_new_qa_pairs(
 
     texts = [f"Q: {r['question']}\nA: {r['answer']}" for r in rows]
     model = get_setting(conn, "embedding_model")
-    vectors = embedder.embed(texts, model=str(model) if model else None)
+    try:
+        vectors = embedder.embed(texts, model=str(model) if model else None)
+    except Exception as exc:
+        return {"embedded": 0, "error": str(exc)}
+    if not vectors or len(vectors) != len(rows):
+        return {"embedded": 0, "error": "embedding provider returned incomplete vectors"}
     payload = [
         {
             "qa_id": int(r["id"]),
@@ -77,6 +82,9 @@ def embed_new_qa_pairs(
         }
         for i, r in enumerate(rows)
     ]
-    count = upsert_qa_embeddings(lancedb_dir, payload)
+    try:
+        count = upsert_qa_embeddings(lancedb_dir, payload)
+    except Exception as exc:
+        return {"embedded": 0, "error": str(exc)}
     mark_embedded(conn, [int(r["id"]) for r in rows])
     return {"embedded": count}
