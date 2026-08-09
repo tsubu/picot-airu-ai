@@ -273,6 +273,16 @@ textarea {
   cursor: not-allowed;
 }
 
+.actions button.danger {
+  background: #9b1c1c;
+  color: #fff;
+}
+
+[data-theme="dark"] .actions button.danger {
+  background: #c44;
+  color: #fff;
+}
+
 .error {
   display: flex;
   justify-content: space-between;

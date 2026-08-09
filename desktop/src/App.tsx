@@ -108,7 +108,7 @@ type ImportRow = {
 };
 
 const SIDECAR_URL = "http://127.0.0.1:18765";
-const APP_VERSION = "0.0.3";
+const APP_VERSION = "0.0.4";
 
 type ThemeMode = "light" | "dark" | "system";
 
@@ -610,6 +610,7 @@ export default function App() {
   }
 
   async function rebuildGraph() {
+    if (!window.confirm(t("settings.rebuildGraphConfirm"))) return;
     setBusy(true);
     setError(null);
     try {
@@ -618,14 +619,87 @@ export default function App() {
         error?: string;
         entity_count?: number;
         relation_count?: number;
+        qa_processed?: number;
         graph?: Settings["graph"];
         trends?: { entity_type: string; name: string; mentions: number }[];
-      }>("rebuild_graph");
+        knowledge?: Settings["knowledge"];
+      }>("rebuild_graph", { full: true });
       if (!res.success) throw new Error(res.error || t("errors.graphRebuildFailed"));
-      setSettings((prev) => ({ ...prev, graph: res.graph }));
+      setSettings((prev) => ({
+        ...prev,
+        graph: res.graph,
+        knowledge: res.knowledge ?? undefined,
+      }));
       setGraphTrends(res.trends || []);
-      alert(t("alerts.graphRebuilt", { entities: res.entity_count ?? 0, relations: res.relation_count ?? 0 }));
+      setFaqs([]);
+      alert(
+        t("alerts.graphRebuiltFull", {
+          entities: res.entity_count ?? 0,
+          relations: res.relation_count ?? 0,
+          qa: res.qa_processed ?? 0,
+        }),
+      );
       await loadSettings();
+      await loadGraphInfo();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resetImportedData() {
+    if (!window.confirm(t("settings.resetDataConfirm"))) return;
+    if (!window.confirm(t("settings.resetDataConfirm2"))) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await sidecar<{
+        success: boolean;
+        error?: string;
+        before?: {
+          messages?: number;
+          qa?: number;
+          conversations?: number;
+          graph_entities?: number;
+          imports?: number;
+        };
+        stats?: Settings["stats"];
+        graph?: Settings["graph"];
+      }>("reset_imported_data", {
+        confirm: "RESET",
+        include_conversations: true,
+      });
+      if (!res.success) throw new Error(res.error || t("errors.resetDataFailed"));
+      setActiveConversation(null);
+      setSources([]);
+      setConversations([]);
+      setImports([]);
+      setFaqs([]);
+      setGraphTrends([]);
+      setSettings((prev) => ({
+        ...prev,
+        stats: res.stats || {
+          messages: 0,
+          conversations: 0,
+          qa: 0,
+          last_import_at: null,
+        },
+        graph: res.graph,
+        knowledge: undefined,
+        faq_snapshot: [],
+      }));
+      alert(
+        t("alerts.dataReset", {
+          messages: res.before?.messages ?? 0,
+          qa: res.before?.qa ?? 0,
+          conversations: res.before?.conversations ?? 0,
+        }),
+      );
+      await loadSettings();
+      await loadConversations();
+      await loadImports();
+      await loadGraphInfo();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -1336,6 +1410,13 @@ export default function App() {
               {t("settings.workspaceExport")}
             </button>
           </div>
+          <p className="muted">{t("settings.rebuildGraphHint")}</p>
+          <div className="actions">
+            <button className="danger" disabled={busy} onClick={resetImportedData}>
+              {t("settings.resetData")}
+            </button>
+          </div>
+          <p className="muted">{t("settings.resetDataHint")}</p>
           <label>{t("settings.workspaceImportLabel")}</label>
           <input
             type="file"

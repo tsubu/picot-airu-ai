@@ -125,11 +125,31 @@ def rebuild_graph(
     conn: sqlite3.Connection,
     *,
     clear_existing: bool = True,
+    full: bool = False,
     progress: ProgressCallback | None = None,
 ) -> dict[str, Any]:
+    """Rebuild Graph entities/relations from QA pairs.
+
+    full=True also clears build history and FAQ snapshot for a clean slate.
+    """
+
     def report(stage: str, pct: float) -> None:
         if progress:
             progress(stage, pct)
+
+    if full:
+        clear_existing = True
+        report("purge", 0.02)
+        conn.execute("DELETE FROM graph_relations")
+        conn.execute("DELETE FROM graph_entities")
+        conn.execute("DELETE FROM graph_builds")
+        conn.commit()
+        try:
+            from security.credentials import set_setting
+
+            set_setting(conn, "faq_snapshot", [])
+        except Exception:
+            pass
 
     cur = conn.execute(
         """
@@ -140,7 +160,7 @@ def rebuild_graph(
     build_id = int(cur.lastrowid)
     conn.commit()
 
-    if clear_existing:
+    if clear_existing and not full:
         conn.execute("DELETE FROM graph_relations")
         conn.execute("DELETE FROM graph_entities")
         conn.commit()
@@ -186,10 +206,17 @@ def rebuild_graph(
             entity_count = ?,
             relation_count = ?,
             qa_processed = ?,
-            status = 'completed'
+            status = 'completed',
+            detail = ?
         WHERE id = ?
         """,
-        (entity_count, relation_count, total, build_id),
+        (
+            entity_count,
+            relation_count,
+            total,
+            "full" if full else ("clear" if clear_existing else "incremental"),
+            build_id,
+        ),
     )
     conn.commit()
     report("done", 1.0)
@@ -199,6 +226,8 @@ def rebuild_graph(
         "relation_count": relation_count,
         "qa_processed": total,
         "status": "completed",
+        "full": full,
+        "cleared": clear_existing or full,
     }
 
 

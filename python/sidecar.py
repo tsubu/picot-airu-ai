@@ -29,6 +29,7 @@ from security.credentials import (  # noqa: E402
     set_setting,
 )
 from services.import_service import run_import  # noqa: E402
+from services.data_reset import reset_imported_data  # noqa: E402
 from services.reply_service import generate_for_existing, generate_for_new  # noqa: E402
 from graph import graph_stats, rebuild_graph, trend_analysis  # noqa: E402
 from graph.advanced import (  # noqa: E402
@@ -371,13 +372,62 @@ def handle_action(payload: dict[str, Any]) -> dict[str, Any]:
         def progress(stage: str, percent: float) -> None:
             STATE.progress = {"stage": f"graph:{stage}", "percent": percent}
 
+        full = bool(payload.get("full", True))
         with STATE.conn() as conn:
-            result = rebuild_graph(conn, clear_existing=True, progress=progress)
+            result = rebuild_graph(
+                conn, clear_existing=True, full=full, progress=progress
+            )
             log_event(conn, "info", "graph_rebuild", result)
             stats = graph_stats(conn)
             trends = trend_analysis(conn)
+            knowledge = knowledge_analysis(conn) if stats.get("entity_count") else None
         STATE.progress = {"stage": "idle", "percent": 1.0}
-        return {"success": True, **result, "graph": stats, "trends": trends}
+        return {
+            "success": True,
+            **result,
+            "graph": stats,
+            "trends": trends,
+            "knowledge": knowledge,
+        }
+
+    if action == "reset_imported_data":
+        confirm = str(payload.get("confirm") or "").strip().upper()
+        if confirm not in {"RESET", "YES", "確認"}:
+            return {
+                "success": False,
+                "error": "破壊的操作です。confirm=RESET を指定してください",
+            }
+
+        def progress(stage: str, percent: float) -> None:
+            STATE.progress = {"stage": f"reset:{stage}", "percent": percent}
+
+        include_conversations = payload.get("include_conversations")
+        if include_conversations is None:
+            include_conversations = True
+        with STATE.conn() as conn:
+            result = reset_imported_data(
+                conn,
+                lancedb_dir=STATE.lancedb_dir,
+                include_conversations=bool(include_conversations),
+                progress=progress,
+            )
+            log_event(conn, "warning", "imported_data_reset", result.get("before"))
+            stats = {
+                "messages": 0,
+                "conversations": result.get("after", {}).get("conversations", 0),
+                "qa": 0,
+                "last_import_at": None,
+            }
+            gstats = graph_stats(conn)
+        STATE.progress = {"stage": "idle", "percent": 1.0}
+        return {
+            "success": True,
+            **result,
+            "stats": stats,
+            "graph": gstats,
+            "trends": [],
+            "knowledge": None,
+        }
 
     if action == "graph_stats":
         with STATE.conn() as conn:

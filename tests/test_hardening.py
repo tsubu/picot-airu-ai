@@ -402,6 +402,70 @@ def test_zip_slip_rejected(tmp_path: Path):
     assert "ZIP" in (result.get("error") or "") or "unsafe" in (result.get("error") or "")
 
 
+def test_reset_imported_data_clears_knowledge(db, tmp_path: Path):
+    from graph import rebuild_graph
+    from security.credentials import set_setting
+    from services.data_reset import reset_imported_data
+
+    sample = write_maildealer_sample(tmp_path)
+    run_import(
+        db,
+        source_type="maildealer_csv",
+        path=sample,
+        staff_addresses=["support@example.com"],
+        staff_domains=["example.com"],
+    )
+    rebuild_graph(db, clear_existing=True, full=True)
+    set_setting(db, "faq_snapshot", [{"question": "q", "answer": "a"}])
+    set_setting(db, "company_name", "PICOT")
+    lance = tmp_path / "lancedb"
+    lance.mkdir()
+    (lance / "dummy.txt").write_text("x", encoding="utf-8")
+
+    assert db.execute("SELECT COUNT(*) AS c FROM messages").fetchone()["c"] > 0
+    assert db.execute("SELECT COUNT(*) AS c FROM qa_pairs").fetchone()["c"] > 0
+    assert db.execute("SELECT COUNT(*) AS c FROM graph_entities").fetchone()["c"] > 0
+
+    result = reset_imported_data(db, lancedb_dir=lance, include_conversations=True)
+    assert result["success"] is True
+    assert db.execute("SELECT COUNT(*) AS c FROM messages").fetchone()["c"] == 0
+    assert db.execute("SELECT COUNT(*) AS c FROM qa_pairs").fetchone()["c"] == 0
+    assert db.execute("SELECT COUNT(*) AS c FROM graph_entities").fetchone()["c"] == 0
+    assert db.execute("SELECT COUNT(*) AS c FROM imports").fetchone()["c"] == 0
+    assert db.execute("SELECT COUNT(*) AS c FROM conversations").fetchone()["c"] == 0
+    # settings preserved
+    from security.credentials import get_setting
+
+    assert get_setting(db, "company_name") == "PICOT"
+    assert get_setting(db, "faq_snapshot") == []
+
+
+def test_graph_full_rebuild_purges_history(db, tmp_path: Path):
+    from graph import rebuild_graph
+
+    sample = write_maildealer_sample(tmp_path)
+    run_import(
+        db,
+        source_type="maildealer_csv",
+        path=sample,
+        staff_addresses=["support@example.com"],
+        staff_domains=["example.com"],
+    )
+    first = rebuild_graph(db, clear_existing=True, full=False)
+    assert first["entity_count"] > 0
+    builds_before = db.execute("SELECT COUNT(*) AS c FROM graph_builds").fetchone()["c"]
+    assert builds_before >= 1
+
+    second = rebuild_graph(db, full=True)
+    assert second["full"] is True
+    assert second["entity_count"] > 0
+    # full purge removes old builds then inserts one new row
+    builds_after = db.execute("SELECT COUNT(*) AS c FROM graph_builds").fetchone()["c"]
+    assert builds_after == 1
+    detail = db.execute("SELECT detail FROM graph_builds ORDER BY id DESC LIMIT 1").fetchone()["detail"]
+    assert detail == "full"
+
+
 def test_duplicate_customer_still_pairs_new_staff(db, tmp_path: Path):
     sample = write_maildealer_sample(tmp_path)
     first = run_import(
